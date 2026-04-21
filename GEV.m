@@ -1,37 +1,38 @@
 clc;
 
-%------------------------------用户可修改参数------------------------------%
-fileName = 'test.xlsx';   % Excel文件名
-sheetName = 'Sheet1';     % 工作表名
-dataCol   = 1;            % 读取第几列数据
-nUse      = 40;           % 使用前多少个样本
-showCI    = false;        % 是否绘制95%置信线（原代码中这部分被注释）
-yTickVals = 0:5000:56000; % y轴刻度
-yLimVals  = [0 56000];    % y轴范围
-%-------------------------------------------------------------------------%
+%============================ User-defined settings ============================%
+fileName  = 'test.xlsx';   % Name of the Excel file
+sheetName = 'Sheet1';      % Name of the worksheet
+dataCol   = 1;             % Column index to be imported
+nUse      = 40;            % Number of samples to use from the beginning
+showCI    = false;         % Plot 95% confidence bounds if true
+yTickVals = 0:5000:56000;  % Y-axis tick values
+yLimVals  = [0 56000];     % Y-axis limits
+%=============================================================================%
 
-%------------------------------------load data----------------------------%
+%=============================== Load the data ================================%
 dataRaw = read_excel_numeric(fileName, sheetName);
 
-if size(dataRaw,2) < dataCol
-    error('数据列不足：当前表只有 %d 列，但你设置要读取第 %d 列。', size(dataRaw,2), dataCol);
+if size(dataRaw, 2) < dataCol
+    error('Insufficient number of columns: the worksheet contains only %d columns, but dataCol is set to %d.', ...
+        size(dataRaw,2), dataCol);
 end
 
 data = dataRaw(:, dataCol);
-data = data(~isnan(data));   % 去掉空值/非数值
+data = data(~isnan(data));   % Remove empty entries and non-numeric values
 
 if isempty(data)
-    error('读取到的数据为空，请检查Excel文件、工作表名称或数据列。');
+    error('No valid numeric data were imported. Please check the Excel file, worksheet name, or selected column.');
 end
 
 if numel(data) < nUse
-    warning('有效数据少于 %d 个，实际仅使用 %d 个样本。', nUse, numel(data));
+    warning('The number of valid samples is less than %d. Only %d samples will be used.', nUse, numel(data));
     nUse = numel(data);
 end
 
-data = data(1:nUse,1);
+data = data(1:nUse, 1);
 
-%------------------------------绘制海森几率网格----------------------------%
+%===================== Construct the probability plotting grid =================%
 figure;
 ax = gca;
 hold(ax, 'on');
@@ -39,7 +40,7 @@ grid(ax, 'on');
 
 s = [0.01 0.05 0.1 0.2 0.5 1 2 5 10 20 30 40 50 ...
      60 70 80 90 95 98 99 99.5 99.8 99.95 99.99];
-s1 = 100 ./ s;
+s1 = 100 ./ s;   % Return period corresponding to exceedance probability
 
 t = norminv(s./100, 0, 1);
 t = t - norminv(0.0001, 0, 1);
@@ -51,15 +52,15 @@ set(ax, 'XTick', t);
 set(ax, 'XLim', [t(1) t(end)]);
 set(ax, 'XTickLabel', s1);
 set(ax, 'XDir', 'reverse');
-set(ax, 'YTick', yTickVals, 'YLim', yLimVals);  % 若样本变化，y范围视情况修改
+set(ax, 'YTick', yTickVals, 'YLim', yLimVals);  % Adjust as needed for different datasets
 
-%-------------------------绘制1961-2015年期间的散点图----------------------%
+%======================== Plot the historical sample points ===================%
 x = data(:);
-n = size(x,1); %#ok<NASGU>  % 保留原变量，不改变逻辑
+n = size(x,1); %#ok<NASGU>  % Retained for consistency with the original code
 
-% 优先调用你已有的 getpoint.m；若没有，则使用下方本地兼容函数
+% Use the external getpoint.m if available; otherwise use the local fallback
 if exist('getpoint', 'file') == 2
-    [a,b] = getpoint(x);   % getpoint函数依期望值公式计算经验频率
+    [a,b] = getpoint(x);   % Empirical plotting positions
 else
     [a,b] = getpoint_local(x);
 end
@@ -67,17 +68,16 @@ end
 handles.data.sample  = a;
 handles.data.psample = b;
 
-p = plot(norminv(b,0,1)-norminv(0.0001,0,1), a, 'o');
-% set(p,'markersize',10);
+p = plot(norminv(b,0,1) - norminv(0.0001,0,1), a, 'o');
+% set(p, 'markersize', 10);
 % handles.plot1 = p;
 
-%----------------------------绘制理论GEV分布和95%置信线--------------------%
-%--------------------- ----绘制理论GEV分布曲线------------------------------%
+%==================== Fit and plot the theoretical GEV curve ==================%
 [parmhat, parmci] = gevfit(x);
 
-k = parmhat(1);
-S = parmhat(2);
-u = parmhat(3);
+k = parmhat(1);   % Shape parameter
+S = parmhat(2);   % Scale parameter
+u = parmhat(3);   % Location parameter
 
 q = (s * 0.01)';
 Y = gev_quantile_safe(k, S, u, q);
@@ -85,12 +85,12 @@ Y = gev_quantile_safe(k, S, u, q);
 p1 = plot(t, Y, '-b', 'LineWidth', 1.2);
 hold on
 
-%--------------------------------绘制95%置信线-----------------------------%
+%======================== Plot the 95% confidence bounds ======================%
 p2 = [];
 p3 = [];
 
 if showCI
-    % 绘制第一条
+    % Lower/upper parameter bound set 1
     k = parmci(1,1);
     S = parmci(1,2);
     u = parmci(1,3);
@@ -99,7 +99,7 @@ if showCI
     Y = gev_quantile_safe(k, S, u, q);
     p2 = plot(t, Y, '-b');
 
-    % 绘制第二条
+    % Lower/upper parameter bound set 2
     k = parmci(2,1);
     S = parmci(2,2);
     u = parmci(2,3);
@@ -109,78 +109,81 @@ if showCI
     p3 = plot(t, Y, '-b');
 end
 
-% 保留你原代码中的这部分计算
+% Retain this calculation from the original script
 b  = b * 100;
 t1 = norminv(b./100, 0, 1); %#ok<NASGU>
 t1 = t1 - norminv(0.0001, 0, 1);
 
-%------------------------------图例与坐标轴-------------------------------%
+%============================= Legend and labels ==============================%
 if showCI
     legend([p, p1, p2, p3], ...
-        'EWL(Historical)', 'Design EWL', ...
-        'Upper limit of 95%', 'Lower limit of 95%', ...
+        'EWL (Historical)', 'Design EWL', ...
+        'Upper 95% limit', 'Lower 95% limit', ...
         'Location', 'best');
 else
-    legend([p, p1], 'EWL(Historical)', 'Design EWL', 'Location', 'best');
+    legend([p, p1], 'EWL (Historical)', 'Design EWL', 'Location', 'best');
 end
 
 box on;
 xlabel('Return period');
 ylabel('EWL');
 
-%% ============================ 本地函数区 ============================= %%
+%% ============================ Local functions ============================ %%
 function data = read_excel_numeric(fileName, sheetName)
-% 兼容不同MATLAB版本的Excel读取方式
+%READ_EXCEL_NUMERIC Read numeric data from an Excel worksheet.
+%   This function is compatible with both newer and older MATLAB versions.
+
     if ~isfile(fileName)
-        error('找不到文件：%s', fileName);
+        error('File not found: %s', fileName);
     end
 
     try
-        % 新版本MATLAB优先
+        % Preferred method for newer MATLAB versions
         data = readmatrix(fileName, 'Sheet', sheetName);
     catch
-        % 旧版本兼容
+        % Fallback for older MATLAB versions
         [data, ~, ~] = xlsread(fileName, sheetName);
     end
 
     if isempty(data)
-        error('未能从文件 %s 的工作表 %s 读取到数值数据。', fileName, sheetName);
+        error('No numeric data could be read from file %s, worksheet %s.', fileName, sheetName);
     end
 end
 
 function [a,b] = getpoint_local(x)
-% 兼容版经验频率计算
-% 若你已有自己的 getpoint.m，程序会优先调用你原来的函数
-% 这里只作为备用，不改变"按经验频率画点"的核心逻辑
+%GETPOINT_LOCAL Compute empirical plotting positions.
+%   If an external GETPOINT function is available, it will be used instead.
+%   This local version is provided only as a fallback.
 
     x = x(:);
     x = x(~isnan(x));
 
     if isempty(x)
-        error('输入到 getpoint 的数据为空。');
+        error('Input data for getpoint is empty.');
     end
 
-    % 年最大值频率分析中常按从小到大排序，经验频率用 m/(n+1)
+    % Sort data in ascending order and compute empirical probabilities
+    % using the m/(n+1) plotting-position formula
     a = sort(x, 'ascend');
     n = numel(a);
     b = (1:n)' ./ (n + 1);
 end
 
 function Y = gev_quantile_safe(k, S, u, q)
-% 保持原GEV公式逻辑，同时增强数值稳定性
-% 当 k 接近 0 时，退化为 Gumbel 分布形式
+%GEV_QUANTILE_SAFE Compute GEV quantiles with improved numerical stability.
+%   When k approaches zero, the distribution reduces to the Gumbel form.
 
     q = q(:);
 
-    % 避免 q 取到 0 或 1 导致 log 出问题
+    % Avoid numerical issues when q is exactly 0 or 1
     q(q <= 0) = eps;
     q(q >= 1) = 1 - eps;
 
     if abs(k) < 1e-8
-        % Gumbel 极限形式
+        % Gumbel limiting case
         Y = u - S .* log(-log(q));
     else
-        % 原代码中的GEV分位数表达式
+        % GEV quantile formula
         Y = u - (S ./ k) .* (1 - (-log(1 - q)).^(-k));
     end
 end
