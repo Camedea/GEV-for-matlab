@@ -7,7 +7,7 @@ TitleStr = 'GEV Flood Frequency Analysis';
 
 %% 1) Load & Prepare
 fprintf('Loading data...\n');
-excel_file = 'Input.xlsx'; sheet_name = 'Sheet1'; col_index = 0;
+excel_file = 'Input.xlsx'; sheet_name = 'Sheet1'; col_index = 1;
 pp_method = 'weibull';   % weibull / hazen / cunnane / gringorten
 
 [data, ~, ~] = xlsread(excel_file, sheet_name);
@@ -35,7 +35,7 @@ set(ax,'GridLineStyle',':','GridAlpha',0.25);
 set(ax,'XLim',[x_ticks_sorted(1) x_ticks_sorted(end)], ...
         'XTick',x_ticks_sorted,'XTickLabel',tick_labels_sorted);
 xlabel(ax,'Annual Exceedance Probability (%)','FontSize',12);
-ylabel(ax,'Flood Discharge (10^9 m^3)','FontSize',12);
+ylabel(ax,'Discharge','FontSize',12);
 
 % ---- Main title: use annotation for full control (move only the title without affecting the axes) ----
 % [left bottom width height] in normalized figure coordinates; width=1 means centered alignment
