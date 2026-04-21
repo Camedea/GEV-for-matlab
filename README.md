@@ -35,3 +35,5 @@ Supported operating systems (MATLAB-supported platforms):
    ```matlab
    GEV
    ```
+6. Typical install time ~15 minutes on a standard desktop computer
+7. Expected run time for demo ~3 minutes 
