@@ -1,189 +1,106 @@
-clc;
+%% GEV Flood Frequency — enlarge plot & move ONLY the title (via annotation)
+clc; clear; close all;
+% ===== You only need to change this: vertical position of the title (normalized coordinates 0–1) =====
+TitleY = 0.91;   % Suggested range: 0.965–0.990; larger values move it higher
+TitleStr = 'GEV Flood Frequency Analysis';
+% ================================================================================================
 
-%============================ User-defined settings ============================%
-fileName  = 'test.xlsx';   % Name of the Excel file
-sheetName = 'Sheet1';      % Name of the worksheet
-dataCol   = 1;             % Column index to be imported
-nUse      = 40;            % Number of samples to use from the beginning
-showCI    = false;         % Plot 95% confidence bounds if true
-yTickVals = 0:5000:56000;  % Y-axis tick values
-yLimVals  = [0 56000];     % Y-axis limits
-%=============================================================================%
+%% 1) Load & Prepare
+fprintf('Loading data...\n');
+excel_file = 'Input.xlsx'; sheet_name = 'Sheet1'; col_index = 0;
+pp_method = 'weibull';   % weibull / hazen / cunnane / gringorten
 
-%=============================== Load the data ================================%
-dataRaw = read_excel_numeric(fileName, sheetName);
+[data, ~, ~] = xlsread(excel_file, sheet_name);
+x_all = data(:, col_index);
+valid = ~isnan(x_all) & x_all > 0;
+x = x_all(valid); n = numel(x);
+fprintf('Loaded %d valid points.\n', n);
 
-if size(dataRaw, 2) < dataCol
-    error('Insufficient number of columns: the worksheet contains only %d columns, but dataCol is set to %d.', ...
-        size(dataRaw,2), dataCol);
+%% 2) Bottom axis ticks (AEP shown; axis uses Gumbel of F=1-AEP)
+prob_exceed = [0.1 0.2 0.5 1 2 5 10 20 30 40 50 ...
+               60 70 80 90 95 98 99 99.5 99.8 99.95 99.99];
+AEP_ticks = prob_exceed/100;
+F_ticks   = 1 - AEP_ticks;
+x_ticks   = -log(-log(F_ticks));
+[x_ticks_sorted, idx_tick] = sort(x_ticks, 'ascend');
+tick_labels_sorted = cellstr(compose('%.2g%%', prob_exceed(idx_tick)));
+
+%% 3) Figure & main axes (ENLARGE plotting area; do not move the top-axis labels)
+fig = figure('Name','GEV Flood Frequency Analysis','NumberTitle','off', ...
+             'Position',[100 100 1100 650],'Color','w');
+
+ax = axes('Parent',fig,'Units','normalized','Position',[0.10 0.10 0.84 0.74]);
+hold(ax,'on'); box(ax,'on'); grid(ax,'on');
+set(ax,'GridLineStyle',':','GridAlpha',0.25);
+set(ax,'XLim',[x_ticks_sorted(1) x_ticks_sorted(end)], ...
+        'XTick',x_ticks_sorted,'XTickLabel',tick_labels_sorted);
+xlabel(ax,'Annual Exceedance Probability (%)','FontSize',12);
+ylabel(ax,'Flood Discharge (10^9 m^3)','FontSize',12);
+
+% ---- Main title: use annotation for full control (move only the title without affecting the axes) ----
+% [left bottom width height] in normalized figure coordinates; width=1 means centered alignment
+annotation(fig,'textbox',[0, TitleY, 1, 0.03], ...
+    'String', TitleStr, 'HorizontalAlignment','center', ...
+    'VerticalAlignment','middle', 'EdgeColor','none', ...
+    'FontSize',16, 'FontWeight','bold');
+
+%% 4) Empirical plotting positions
+x_sorted = sort(x(:), 'descend'); n = numel(x_sorted);
+switch lower(pp_method)
+    case 'weibull',    AEP_emp = ((1:n)')/(n+1);
+    case 'hazen',      AEP_emp = (((1:n)')-0.5)/n;
+    case 'cunnane',    AEP_emp = (((1:n)')-0.4)/(n+0.2);
+    case 'gringorten', AEP_emp = (((1:n)')-0.44)/(n+0.12);
+    otherwise,         AEP_emp = ((1:n)')/(n+1);
 end
+AEP_emp = max(min(AEP_emp,0.999999),1e-6);
+F_emp   = 1 - AEP_emp;
+emp_x   = -log(-log(F_emp));
+h_emp = plot(ax, emp_x, x_sorted, 'og','MarkerSize',7, ...
+    'MarkerFaceColor','g','DisplayName','Empirical Data');
 
-data = dataRaw(:, dataCol);
-data = data(~isnan(data));   % Remove empty entries and non-numeric values
+%% 5) Fit GEV & curves
+[parmhat, parmci] = gevfit(x);   % [k, sigma, mu]
+k_fit=parmhat(1); s_fit=parmhat(2); m_fit=parmhat(3);
 
-if isempty(data)
-    error('No valid numeric data were imported. Please check the Excel file, worksheet name, or selected column.');
-end
+F_line = linspace(0.001,0.999,400)'; x_line = -log(-log(F_line));
+Y_fit  = gevinv(F_line, k_fit, s_fit, m_fit);
+Y_lo   = gevinv(F_line, parmci(1,1), parmci(1,2), parmci(1,3));
+Y_hi   = gevinv(F_line, parmci(2,1), parmci(2,2), parmci(2,3));
 
-if numel(data) < nUse
-    warning('The number of valid samples is less than %d. Only %d samples will be used.', nUse, numel(data));
-    nUse = numel(data);
-end
+h_fit = plot(ax, x_line, Y_fit,'-r','LineWidth',2,'DisplayName','GEV Fit');
+h_ci  = plot(ax, x_line, Y_lo,'--b','LineWidth',1.3,'DisplayName','95% CI');
+        plot(ax, x_line, Y_hi,'--b','LineWidth',1.3,'HandleVisibility','off');
+legend(ax,[h_emp,h_fit,h_ci],'Location','northwest','Box','off','FontSize',10);
 
-data = data(1:nUse, 1);
+%% 6) Top X axis: Return period (years)
+T_ticks = [2 5 10 20 50 100 200 500 1000];
+F_top   = 1 - 1./T_ticks; x_top = -log(-log(F_top));
+ax_top = axes('Parent',fig,'Units','normalized','Position',get(ax,'Position'), ...
+              'Color','none','XAxisLocation','top','YAxisLocation','right', ...
+              'YTick',[],'YColor','none','XLim',get(ax,'XLim'));
+set(ax_top,'XTick',x_top,'XTickLabel',cellstr(string(T_ticks)));
+xlabel(ax_top,'Return Period (years)','FontSize',12);
+linkaxes([ax ax_top],'x');
 
-%===================== Construct the probability plotting grid =================%
-figure;
-ax = gca;
-hold(ax, 'on');
-grid(ax, 'on');
+%% 7) Optional: table, test, and save
+return_periods = [2,5,10,25,50,100,200,500,1000]';
+F_return = 1 - 1./return_periods;
+Q  = gevinv(F_return,k_fit,s_fit,m_fit);
+QL = gevinv(F_return,parmci(1,1),parmci(1,2),parmci(1,3));
+QU = gevinv(F_return,parmci(2,1),parmci(2,2),parmci(2,3));
 
-s = [0.01 0.05 0.1 0.2 0.5 1 2 5 10 20 30 40 50 ...
-     60 70 80 90 95 98 99 99.5 99.8 99.95 99.99];
-s1 = 100 ./ s;   % Return period corresponding to exceedance probability
+x_test = sort(x(:)); F0 = gevcdf(x_test,k_fit,s_fit,m_fit);
+[h_ks,p_ks] = kstest(x_test,'CDF',[x_test,F0]);
+theo_q_emp = gevinv(F_emp,k_fit,s_fit,m_fit);
+rmse = sqrt(mean((x_sorted-theo_q_emp).^2));
+fprintf('KS p=%.4f; RMSE=%.4f\n', p_ks, rmse);
 
-t = norminv(s./100, 0, 1);
-t = t - norminv(0.0001, 0, 1);
+tbl = table(return_periods,(1-F_return)*100,Q,QL,QU, ...
+    'VariableNames',{'T_years','AEP_percent','Q','Q_L','Q_U'});
+try, writetable(tbl,'GEV.xlsx','Sheet','ReturnPeriods');
+catch, writetable(tbl,'GEV.csv'); end
 
-handles.data.p = s;
-handles.data.x = t;
-
-set(ax, 'XTick', t);
-set(ax, 'XLim', [t(1) t(end)]);
-set(ax, 'XTickLabel', s1);
-set(ax, 'XDir', 'reverse');
-set(ax, 'YTick', yTickVals, 'YLim', yLimVals);  % Adjust as needed for different datasets
-
-%======================== Plot the historical sample points ===================%
-x = data(:);
-n = size(x,1); %#ok<NASGU>  % Retained for consistency with the original code
-
-% Use the external getpoint.m if available; otherwise use the local fallback
-if exist('getpoint', 'file') == 2
-    [a,b] = getpoint(x);   % Empirical plotting positions
-else
-    [a,b] = getpoint_local(x);
-end
-
-handles.data.sample  = a;
-handles.data.psample = b;
-
-p = plot(norminv(b,0,1) - norminv(0.0001,0,1), a, 'o');
-% set(p, 'markersize', 10);
-% handles.plot1 = p;
-
-%==================== Fit and plot the theoretical GEV curve ==================%
-[parmhat, parmci] = gevfit(x);
-
-k = parmhat(1);   % Shape parameter
-S = parmhat(2);   % Scale parameter
-u = parmhat(3);   % Location parameter
-
-q = (s * 0.01)';
-Y = gev_quantile_safe(k, S, u, q);
-
-p1 = plot(t, Y, '-b', 'LineWidth', 1.2);
-hold on
-
-%======================== Plot the 95% confidence bounds ======================%
-p2 = [];
-p3 = [];
-
-if showCI
-    % Lower/upper parameter bound set 1
-    k = parmci(1,1);
-    S = parmci(1,2);
-    u = parmci(1,3);
-
-    q = (s * 0.01)';
-    Y = gev_quantile_safe(k, S, u, q);
-    p2 = plot(t, Y, '-b');
-
-    % Lower/upper parameter bound set 2
-    k = parmci(2,1);
-    S = parmci(2,2);
-    u = parmci(2,3);
-
-    q = (s * 0.01)';
-    Y = gev_quantile_safe(k, S, u, q);
-    p3 = plot(t, Y, '-b');
-end
-
-% Retain this calculation from the original script
-b  = b * 100;
-t1 = norminv(b./100, 0, 1); %#ok<NASGU>
-t1 = t1 - norminv(0.0001, 0, 1);
-
-%============================= Legend and labels ==============================%
-if showCI
-    legend([p, p1, p2, p3], ...
-        'EWL (Historical)', 'Design EWL', ...
-        'Upper 95% limit', 'Lower 95% limit', ...
-        'Location', 'best');
-else
-    legend([p, p1], 'EWL (Historical)', 'Design EWL', 'Location', 'best');
-end
-
-box on;
-xlabel('Return period');
-ylabel('EWL');
-
-%% ============================ Local functions ============================ %%
-function data = read_excel_numeric(fileName, sheetName)
-%READ_EXCEL_NUMERIC Read numeric data from an Excel worksheet.
-%   This function is compatible with both newer and older MATLAB versions.
-
-    if ~isfile(fileName)
-        error('File not found: %s', fileName);
-    end
-
-    try
-        % Preferred method for newer MATLAB versions
-        data = readmatrix(fileName, 'Sheet', sheetName);
-    catch
-        % Fallback for older MATLAB versions
-        [data, ~, ~] = xlsread(fileName, sheetName);
-    end
-
-    if isempty(data)
-        error('No numeric data could be read from file %s, worksheet %s.', fileName, sheetName);
-    end
-end
-
-function [a,b] = getpoint_local(x)
-%GETPOINT_LOCAL Compute empirical plotting positions.
-%   If an external GETPOINT function is available, it will be used instead.
-%   This local version is provided only as a fallback.
-
-    x = x(:);
-    x = x(~isnan(x));
-
-    if isempty(x)
-        error('Input data for getpoint is empty.');
-    end
-
-    % Sort data in ascending order and compute empirical probabilities
-    % using the m/(n+1) plotting-position formula
-    a = sort(x, 'ascend');
-    n = numel(a);
-    b = (1:n)' ./ (n + 1);
-end
-
-function Y = gev_quantile_safe(k, S, u, q)
-%GEV_QUANTILE_SAFE Compute GEV quantiles with improved numerical stability.
-%   When k approaches zero, the distribution reduces to the Gumbel form.
-
-    q = q(:);
-
-    % Avoid numerical issues when q is exactly 0 or 1
-    q(q <= 0) = eps;
-    q(q >= 1) = 1 - eps;
-
-    if abs(k) < 1e-8
-        % Gumbel limiting case
-        Y = u - S .* log(-log(q));
-    else
-        % GEV quantile formula
-        Y = u - (S ./ k) .* (1 - (-log(1 - q)).^(-k));
-    end
-end
+try, exportgraphics(fig,'GEV.png','Resolution',300);
+catch, saveas(fig,'GEV.png'); end
+savefig(fig,'GEV.fig');
